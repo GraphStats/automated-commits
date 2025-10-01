@@ -1,62 +1,46 @@
-name: Automated Daily Commit
+name: Fetch MrBeast Subs
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  push:
-    branches:
-      - master
-    paths:
-      - ".env"
-      - ".github/workflows/master.yml"
+    - cron: "*/5 * * * *" # toutes les 5 minutes (minimum GitHub)
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  auto-commit:
+  fetch_subs:
     runs-on: ubuntu-latest
     steps:
-
-      - name: checkout repo content
-        uses: actions/checkout@v2
-
-      - name: Dotenv Action
-        id: dotenv
-        uses: falti/dotenv-action@v0.2.8
-
-
-      - name: setup user configuration
+      - name: Decide if run
+        id: decide
         run: |
-          git config user.name ${{ steps.dotenv.outputs.user_name }}
-          git config user.email ${{ steps.dotenv.outputs.user_email }}
-          echo "username=${{ steps.dotenv.outputs.user_username }}" >> $GITHUB_ENV
-
-      - name: Get streak from api
-        run: |
-          lastdate=$(wget https://api.achyut.com.np/api/streak/${{ env.username }}/date -q -O -)
-          nowdate=$(date +"%B %d, %Y")
-
-          if [[ "$nowdate" == "$lastdate" ]]; then
-            echo "Same date, skipping commit"
+          # 80% de chance d'exécuter
+          if [ $(( RANDOM % 10 )) -lt 6 ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+            echo "✅ Run (60% chance)"
           else
-            streak=$(wget https://api.achyut.com.np/api/streak/${{ env.username }} -q -O -)
-            echo "streak=$streak" >> $GITHUB_ENV
-          fi
-          echo "lastdate=$lastdate" >> $GITHUB_ENV
-          echo "nowdate=$nowdate" >> $GITHUB_ENV
-      
-      - name: Update README.md
-        run: |
-          if [[ "${{ env.nowdate }}" == "${{ env.lastdate }}" ]]; then
-            echo "Same date, skipping commit"
-          else
-            wget -qO- https://api.achyut.com.np/api/streak/${{ env.username }}/text | sed -e 's/<[^>]*>//g' > README.md
-
-            echo "::: Commiting the changes :::"
-
-            git add .
-            git commit -m "Commit for streak ${{ env.streak }} on ${{ env.nowdate }}"
+            echo "run=false" >> $GITHUB_OUTPUT
+            echo "❌ Skip (20% chance)"
           fi
 
-      - name: Push changes
-        uses: ad-m/github-push-action@master
+      - name: Checkout repo
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/checkout@v4
         with:
-          force: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch subscriber count
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          curl -s https://backend.mixerno.space/api/youtube/estv3/UCX6OQ3DkcsbYNE6H8uQQuVA \
+          | jq '{subscriberCount: .items[0].statistics.subscriberCount}' > mrbeast.json
+
+      - name: Commit and push
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mrbeast.json
+          git commit -m "Update subscriber count [skip ci]" || echo "No changes to commit"
+          git push
